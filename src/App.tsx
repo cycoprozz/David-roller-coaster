@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './styles.css';
+import { formatDuration, getManualMakes, getManualModels, getManualOptions } from './vehicleMpgManual';
 
 type Theme = 'dark' | 'light';
 type Lang = 'en' | 'fr' | 'ht' | 'es';
@@ -360,7 +361,7 @@ function App() {
   const [model, setModel] = useState('Camry');
   const [makes, setMakes] = useState<string[]>(starterMakes);
   const [models, setModels] = useState<string[]>(['Camry', 'Corolla', 'RAV4', 'Prius']);
-  const [options, setOptions] = useState<{ id: string; text: string }[]>([]);
+  const [options, setOptions] = useState<{ id: string; text: string; mpg?: number }[]>([]);
   const [vehicleId, setVehicleId] = useState('');
   const [manualMpg, setManualMpg] = useState(32);
   const [vehicleMpg, setVehicleMpg] = useState(32);
@@ -418,31 +419,55 @@ function App() {
   }, [destination]);
 
   useEffect(() => {
+    const localMakes = getManualMakes(year);
     fuelEconomy(`vehicle/menu/make?year=${year}`)
-      .then((xml) => setMakes(menuItems(xml)))
-      .catch(() => setMakes(starterMakes));
+      .then((xml) => setMakes(Array.from(new Set([...localMakes, ...menuItems(xml)])).sort()))
+      .catch(() => setMakes(localMakes.length ? localMakes : starterMakes));
   }, [year]);
 
   useEffect(() => {
     if (!make) return;
+    const localModels = getManualModels(year, make);
     fuelEconomy(`vehicle/menu/model?year=${year}&make=${encodeURIComponent(make)}`)
-      .then((xml) => setModels(menuItems(xml)))
-      .catch(() => setModels((current) => current.length ? current : ['Camry']));
+      .then((xml) => setModels(Array.from(new Set([...localModels, ...menuItems(xml)])).sort()))
+      .catch(() => setModels(localModels.length ? localModels : ['Camry']));
   }, [year, make]);
 
   useEffect(() => {
     if (!model) return;
+    const localOptions = getManualOptions(year, make, model);
     fuelEconomy(`vehicle/menu/options?year=${year}&make=${encodeURIComponent(make)}&model=${encodeURIComponent(model)}`)
       .then((xml) => {
-        const opts = vehicleOptions(xml);
-        setOptions(opts);
-        setVehicleId(opts[0]?.id || '');
+        const apiOptions = vehicleOptions(xml);
+        const merged = [...apiOptions, ...localOptions.filter((local) => !apiOptions.some((api) => api.text === local.text))];
+        setOptions(merged);
+        setVehicleId(merged[0]?.id || '');
+        if (!apiOptions.length && localOptions[0]) {
+          setVehicleMpg(localOptions[0].mpg);
+          setManualMpg(localOptions[0].mpg);
+          setMpgSource('Built-in vehicle MPG manual');
+        }
       })
-      .catch(() => setOptions([]));
+      .catch(() => {
+        setOptions(localOptions);
+        setVehicleId(localOptions[0]?.id || '');
+        if (localOptions[0]) {
+          setVehicleMpg(localOptions[0].mpg);
+          setManualMpg(localOptions[0].mpg);
+          setMpgSource('Built-in vehicle MPG manual');
+        }
+      });
   }, [year, make, model]);
 
   useEffect(() => {
     if (!vehicleId) return;
+    const localOption = options.find((option) => option.id === vehicleId && option.mpg);
+    if (localOption?.mpg) {
+      setVehicleMpg(localOption.mpg);
+      setManualMpg(localOption.mpg);
+      setMpgSource('Built-in vehicle MPG manual');
+      return;
+    }
     fuelEconomy(`vehicle/${vehicleId}`)
       .then((xml) => {
         const mpg = Number(xml.querySelector('comb08')?.textContent || 0);
@@ -453,7 +478,7 @@ function App() {
         }
       })
       .catch(() => setMpgSource('Manual MPG fallback'));
-  }, [vehicleId]);
+  }, [vehicleId, options]);
 
   const tripMath = useMemo(() => {
     const distanceMiles = route ? miles(route.distanceKm) : 0;
@@ -526,7 +551,7 @@ function App() {
   function answerAssistant() {
     const q = assistantInput.toLowerCase();
     const parts = [];
-    if (route) parts.push(`Your fastest route is ${one(tripMath.distanceMiles)} miles and about ${Math.round(route.durationMin)} minutes.`);
+    if (route) parts.push(`Your fastest route is ${one(tripMath.distanceMiles)} miles and about ${formatDuration(route.durationMin)}.`);
     if (q.includes('save') || q.includes('cheap') || q.includes('cost')) {
       parts.push(`Fuel strategy: keep speed smooth, avoid hard accelerations, and fill up before high-price metro/tourist areas. At ${one(tripMath.mpg)} MPG, each $0.25/gal price difference changes this trip by about ${money(tripMath.gallons * 0.25)}.`);
     }
@@ -593,8 +618,8 @@ function App() {
               {options.map((o) => <option key={o.id} value={o.id}>{o.text}</option>)}
             </select>
           </label>
-          <label>Manual combined MPG fallback<input type="number" min="1" value={manualMpg} onChange={(e) => { setManualMpg(Number(e.target.value)); setVehicleMpg(Number(e.target.value)); setMpgSource('Manual MPG fallback'); }} /></label>
-          <p className="hint">MPG source: {mpgSource}</p>
+          <label>Estimated combined MPG<input type="number" min="1" value={manualMpg} onChange={(e) => { setManualMpg(Number(e.target.value)); setVehicleMpg(Number(e.target.value)); setMpgSource('Manual MPG fallback'); }} /></label>
+          <p className="hint">MPG source: {mpgSource}. Choose year, make, model, and trim to auto-fill from the built-in manual catalog when FuelEconomy.gov is unavailable.</p>
 
           <h2>Fuel price</h2>
           <div className="two-cols">
@@ -611,7 +636,7 @@ function App() {
         <aside className="panel summary">
           <h2>{t.summary}</h2>
           <Metric label="Distance" value={route ? `${one(tripMath.distanceMiles)} mi` : '—'} />
-          <Metric label="Travel time" value={route ? `${Math.round(route.durationMin)} min` : '—'} />
+          <Metric label="Travel time" value={route ? formatDuration(route.durationMin) : '—'} />
           <Metric label="Vehicle MPG" value={`${one(tripMath.mpg)} MPG`} />
           <Metric label="Gallons needed" value={route ? `${one(tripMath.gallons)} gal` : '—'} />
           <Metric label="Fuel price" value={`${money(gasPrice)} / gal`} />
@@ -623,7 +648,7 @@ function App() {
       <section className="lower-grid">
         <div className="panel directions">
           <h2>Turn-by-turn details</h2>
-          <ol>{(route?.steps || []).slice(0, 12).map((step, i) => <li key={i}><span>{step.instruction}</span><small>{one(step.distance / 1609.344)} mi · {Math.round(step.duration / 60)} min</small></li>)}</ol>
+          <ol>{(route?.steps || []).slice(0, 12).map((step, i) => <li key={i}><span>{step.instruction}</span><small>{one(step.distance / 1609.344)} mi · {formatDuration(step.duration / 60)}</small></li>)}</ol>
           {!route && <p className="hint">Route steps appear after calculation.</p>}
         </div>
 
@@ -639,7 +664,7 @@ function App() {
           <div className="trip-list">
             {savedTrips.map((trip) => <article key={trip.id} className="trip-card">
               <strong>{trip.origin} → {trip.destination}</strong>
-              <span>{new Date(trip.date).toLocaleString()} · {one(miles(trip.distanceKm))} mi · {money(trip.cost)}</span>
+              <span>{new Date(trip.date).toLocaleString()} · {one(miles(trip.distanceKm))} mi · {formatDuration(trip.durationMin)} · {money(trip.cost)}</span>
               <button className="danger" onClick={() => setSavedTrips((items) => items.filter((item) => item.id !== trip.id))}>Delete</button>
             </article>)}
             {!savedTrips.length && <p className="hint">No saved trips yet. Calculate and save one.</p>}

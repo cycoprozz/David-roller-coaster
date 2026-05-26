@@ -9,7 +9,8 @@ David Roller Coaster is a modern React road-trip planner that calculates driving
 - Fastest-route calculation with the public OSRM driving API
 - Turn-by-turn route details
 - Vehicle year/make/model/trim MPG lookup through FuelEconomy.gov
-- Manual MPG fallback
+- Built-in manual MPG catalog for common year/make/model/trim specs when live MPG lookup is unavailable
+- Manual MPG override
 - State-level gas-price field with configurable API hook and built-in fallback estimates
 - Trip summary: distance, travel time, MPG, gallons, gas price, and estimated cost
 - Save/recall/delete trips with localStorage
@@ -50,11 +51,8 @@ This project intentionally uses low-cost public data by default:
 - Routing: OSRM public demo server
 - Map tiles: OpenStreetMap tiles
 - Address autofill suggestions through OpenStreetMap Nominatim
-- Vehicle MPG: FuelEconomy.gov Web Services
-- Upside-style 50-mile fuel marketplace panel with nearby station discovery, price sorting, and promo-ready offer cards
-- Optional `VITE_GAS_DEALS_API_URL` hook for verified live gas prices and real promo/cashback data
-- EV charging discovery within 50 miles, prioritizing Tesla Superchargers while also listing third-party chargers
-- Gas price: built-in state estimates unless a gas-price/deals API is configured
+- Vehicle MPG: FuelEconomy.gov Web Services with a built-in manual MPG catalog fallback for common year/make/model/trim specs
+- Gas price: built-in state estimates unless a gas-price API is configured
 
 Important: public routing/geocoding services are fine for demos and light usage. For production traffic, use a paid or self-hosted provider such as Mapbox, OpenRouteService, GraphHopper, Google Maps Platform, or a private OSRM instance.
 
@@ -64,7 +62,6 @@ Create `.env.local` if you want to connect a gas-price API:
 
 ```bash
 VITE_GAS_PRICE_API_URL="https://your-gas-api.example.com/prices?region={region}"
-VITE_GAS_DEALS_API_URL="https://your-gas-deals-api.example.com/deals?lat={lat}&lon={lon}&radius={radius}&region={region}"
 ```
 
 Expected response shape can be any of these:
